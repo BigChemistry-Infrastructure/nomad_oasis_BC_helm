@@ -1,0 +1,4 @@
+# Helm packaging / publishing artifacts
+public/
+old-index.yaml
+*.tgz

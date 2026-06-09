@@ -1,0 +1,128 @@
+# Publishes Helm charts to GitHub Pages
+# (public/ -> https://bigchemistry-infrastructure.github.io/nomad_oasis_BC_helm)
+#
+# Install:
+#   helm repo add nomad-bc https://bigchemistry-infrastructure.github.io/nomad_oasis_BC_helm
+#   helm repo update
+#   helm install nomad-oasis nomad-bc/default -f my-values.yaml
+#
+# Requirements (one-time, in repo Settings -> Pages):
+#   Build and deployment -> Source: "GitHub Actions"
+
+name: Release Helm Charts
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Allow the workflow to publish to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one concurrent Pages deployment; don't cancel an in-progress one
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  PAGES_URL: "https://bigchemistry-infrastructure.github.io/nomad_oasis_BC_helm"
+  CHARTS_DIR: "charts"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      # Cache the Helm repository index + downloaded dependency charts so
+      # subsequent runs don't re-fetch every subchart from upstream.
+      - name: Cache Helm dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/helm
+            ~/.local/share/helm/repository
+            charts/**/charts/*.tgz
+          key: helm-deps-${{ runner.os }}-${{ hashFiles('charts/**/Chart.lock', 'charts/**/Chart.yaml') }}
+          restore-keys: |
+            helm-deps-${{ runner.os }}-
+
+      # Subchart repositories (must match charts/default/Chart.yaml dependencies)
+      - name: Add and update subchart repositories
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add elastic https://helm.elastic.co
+          helm repo add temporal https://go.temporal.io/helm-charts
+          helm repo add jupyterhub https://jupyterhub.github.io/helm-chart/
+          helm repo add codecentric https://codecentric.github.io/helm-charts
+          helm repo update
+
+      # Vendor (cache) dependencies into each chart before packaging
+      - name: Update chart dependencies
+        run: |
+          for chart in ${CHARTS_DIR}/*/; do
+            if [ -f "${chart}Chart.yaml" ]; then
+              echo "Updating dependencies for ${chart}"
+              helm dependency update "${chart}"
+            fi
+          done
+
+      - name: Package charts and (re)build index
+        run: |
+          mkdir -p public
+
+          # Preserve previously published chart versions from the live Pages index
+          if curl -fsSL "${PAGES_URL}/index.yaml" -o public/old-index.yaml; then
+            echo "Found existing index, downloading published charts..."
+            grep -E '^\s*-\s*https?://' public/old-index.yaml | awk '{print $2}' | while read -r url; do
+              echo "Downloading ${url}"
+              curl -fsSL "${url}" -o "public/$(basename "${url}")" || true
+            done
+          else
+            echo "No existing index found, starting fresh."
+          fi
+
+          # Package all charts under charts/ (e.g. charts/default -> default-<version>.tgz)
+          for chart in ${CHARTS_DIR}/*/; do
+            if [ -f "${chart}Chart.yaml" ]; then
+              echo "Packaging ${chart}"
+              helm package "${chart}" -d public/
+            fi
+          done
+
+          # Merge with previous index so older releases remain installable
+          if [ -f public/old-index.yaml ]; then
+            helm repo index public/ --url "${PAGES_URL}" --merge public/old-index.yaml
+            rm -f public/old-index.yaml
+          else
+            helm repo index public/ --url "${PAGES_URL}"
+          fi
+
+          echo "Published charts:"
+          ls -la public/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

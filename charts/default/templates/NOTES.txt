@@ -1,0 +1,52 @@
+{{- $config := .Values.nomad.config -}}
+{{- $path := $config.services.api_base_path -}}
+{{- $apiHost := $config.services.api_host -}}
+{{- $tlsEnabled := or .Values.nomad.ingress.tls .Values.nomad.ingress.certManager.enabled -}}
+
+{{- if and $config.temporal.enabled (not .Values.temporal.enabled) }}
+⚠️  WARNING: temporal is enabled in nomad.yaml but temporal subchart is disabled
+{{- end }}
+{{- if and $config.north.enabled (not .Values.jupyterhub.enabled) }}
+⚠️  WARNING: north is enabled in nomad.yaml but jupyterhub subchart is disabled
+{{- end }}
+{{- if and (not .Values.nomad.secrets.api.existingSecret) (not .Values.nomad.secrets.api.value) (not .Values.nomad.secrets.api.autoGenerate) }}
+⚠️  WARNING: No API secret configured. Set nomad.secrets.api.existingSecret, nomad.secrets.api.value, or nomad.secrets.api.autoGenerate
+{{- end }}
+{{- if .Values.nomad.ingress.certManager.enabled }}
+{{- if not .Values.nomad.ingress.certManager.issuerName }}
+⚠️  WARNING: certManager is enabled but nomad.ingress.certManager.issuerName is not set. No certificate will be issued.
+{{- end }}
+{{- if not $config.services.https }}
+⚠️  WARNING: certManager is enabled but nomad.config.services.https is false. Set it to true so NOMAD generates https:// URLs.
+{{- end }}
+
+ℹ  cert-manager is enabled. It must be installed separately in the cluster (it is a
+   cluster-level operator and cannot be bundled as a subchart):
+
+     helm repo add jetstack https://charts.jetstack.io
+     helm install cert-manager jetstack/cert-manager \
+       -n cert-manager --create-namespace \
+       --set crds.enabled=true
+
+   A ClusterIssuer or Issuer named "{{ .Values.nomad.ingress.certManager.issuerName }}" must also
+   exist before certificates will be issued. See custom-values/tls.yaml for examples.
+{{- end }}
+
+1. Get the application URL by running these commands:
+{{- if .Values.nomad.ingress.enabled }}
+  http{{ if $tlsEnabled }}s{{ end }}://{{ $apiHost }}{{ $path }}
+{{- else if contains "NodePort" .Values.nomad.service.type }}
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "nomad.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.nomad.service.type }}
+     NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+           You can watch the status of by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "nomad.fullname" . }}'
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "nomad.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+  echo http://$SERVICE_IP:{{ .Values.nomad.service.port }}
+{{- else if contains "ClusterIP" .Values.nomad.service.type }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "nomad.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}

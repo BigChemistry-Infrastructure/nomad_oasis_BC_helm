@@ -1,0 +1,131 @@
+{{- if .Values.nomad.enabled -}}
+{{- $config := .Values.nomad.config -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nomad.fullname" . }}-proxy
+  labels:
+    {{- include "nomad.labels" . | nindent 4 }}
+    app.kubernetes.io/component: proxy
+spec:
+  replicas: {{ .Values.nomad.proxy.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "nomad.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: proxy
+  template:
+    metadata:
+      {{- with .Values.nomad.proxy.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "nomad.labels" . | nindent 8 }}
+        {{- with .Values.nomad.proxy.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        app.kubernetes.io/component: proxy
+    spec:
+      {{- with .Values.nomad.proxy.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # serviceAccountName: {{ include "nomad.serviceAccountName" . }}
+      {{- with .Values.nomad.proxy.podSecurityContext }}
+      securityContext:
+        {{- . | toYaml | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}-proxy
+          {{- with .Values.nomad.proxy.securityContext }}
+          securityContext:
+            {{- . | toYaml | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.nomad.proxy.image.repository }}:{{ .Values.nomad.proxy.image.tag }}"
+          imagePullPolicy: {{ .Values.nomad.proxy.image.pullPolicy }}
+          {{- with .Values.nomad.proxy.command }}
+          command:
+            {{- range . }}
+            - {{ tpl . $ }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.nomad.proxy.args }}
+          args:
+            {{- range . }}
+            - {{ tpl . $ }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.nomad.proxy.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: "{{ $config.services.api_base_path }}/gui/index.html"
+              port: http
+            initialDelaySeconds: {{ .Values.nomad.proxy.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.nomad.proxy.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.nomad.proxy.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.nomad.proxy.livenessProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .Values.nomad.proxy.livenessProbe.successThreshold | default 1 }}
+          readinessProbe:
+            httpGet:
+              path: "{{ $config.services.api_base_path }}/gui/index.html"
+              port: http
+            initialDelaySeconds: {{ .Values.nomad.proxy.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.nomad.proxy.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.nomad.proxy.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.nomad.proxy.readinessProbe.failureThreshold | default 3 }}
+            successThreshold: {{ .Values.nomad.proxy.readinessProbe.successThreshold | default 1 }}
+          {{- with .Values.nomad.proxy.resources }}
+          resources:
+            {{- . | toYaml | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - mountPath: /etc/nginx/conf.d
+              readOnly: true
+              name: nginx-conf
+            - mountPath: /var/log/nginx
+              name: log
+            - mountPath: /var/cache/nginx
+              name: nginx-cache
+            - mountPath: /var/run
+              name: nginx-run
+          {{- with .Values.nomad.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.nomad.proxy.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: nginx-conf
+          configMap:
+            name: {{ include "nomad.fullname" . }}-configmap-proxy
+            items:
+            - key: nginx.conf
+              path: default.conf
+        - name: log
+          emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+      {{- with .Values.nomad.volumes }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nomad.proxy.volumes }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nomad.proxy.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nomad.proxy.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nomad.proxy.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end}}
