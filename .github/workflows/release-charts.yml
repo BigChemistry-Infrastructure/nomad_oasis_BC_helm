@@ -39,6 +39,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Ensure Pages is configured to deploy from GitHub Actions (not a branch).
+      # enablement: true flips the repo's Pages "Source" to "GitHub Actions" so
+      # the deploy job below can publish the artifact (otherwise deploy-pages
+      # fails and Pages serves the branch README instead of the chart index).
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - name: Install Helm
         uses: azure/setup-helm@v4
         with:
