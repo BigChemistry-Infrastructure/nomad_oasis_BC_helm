@@ -21,7 +21,11 @@ serviceAccount:
   name: ""
 
 nomad:
+
   enabled: true
+
+  adminconsole:
+    enabled: false
 
   priorityClass:
     enabled: false
